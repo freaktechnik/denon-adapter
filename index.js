@@ -314,7 +314,7 @@ class HEOSDevice extends Device {
         await this.adapter.ensureHeosConnection();
         //TODO re-add listener when heosConnection resumes
         this.adapter.heosConnection.onAll((message) => {
-            if (message.heos?.message?.parsed?.pid == this.heosPlayer.pid && (message.heos?.result ?? 'success') === 'success') {
+            if (message && message.heos && message.heos.message && message.heos.message.parsed && message.heos.message.parsed.pid == this.heosPlayer.pid && (message.heos.result || 'success') === 'success') {
                 try {
                     this.handleHeosEvent(message);
                 }
@@ -380,7 +380,7 @@ class HEOSDevice extends Device {
                 this.findProperty('artist').setCachedValueAndNotify(message.payload.artist);
                 // this.findProperty('albumArt').links[0].href = message.payload.image_url;
                 if(!this.overrideStation) {
-                    this.findProperty('station').setCachedValueAndNotify(message.payload?.station);
+                    this.findProperty('station').setCachedValueAndNotify(message.payload.station || '');
                 }
                 this.sourceType = message.payload.type;
                 this.availablePlaybackOptions = message.options;
@@ -1098,7 +1098,7 @@ class DenonAdapter extends Adapter {
                             commandGroup: 'player',
                             command: 'get_players'
                         }, (message) => {
-                            if(message?.heos?.result === 'success') {
+                            if(message && message.heos && message.heos.result === 'success') {
                                 resolve(message.payload);
                             }
                             else {
@@ -1154,7 +1154,7 @@ class DenonAdapter extends Adapter {
                 commandGroup,
                 command
             }, (message) => {
-                if(message?.heos?.result === 'success') {
+                if(message && message.heos && message.heos.result === 'success') {
                     resolve(message);
                 }
                 else {
