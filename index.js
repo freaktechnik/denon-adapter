@@ -988,10 +988,12 @@ class DenonDevice extends HEOSDevice {
             this.findProperty('surroundMode').setCachedValueAndNotify(message.slice(2));
         }
         else if(message === 'PWON') {
+            console.log('on');
             this.findProperty('on').setCachedValueAndNotify(true);
             await this.initDenonProperties();
         }
         else if(message === 'PWSTANDBY') {
+            console.log('off');
             this.findProperty('on').setCachedValueAndNotify(false);
         }
         else if(message.startsWith('OPTXM')) {
