@@ -546,14 +546,7 @@ class DenonDevice extends HEOSDevice {
         this['@type'] = [ 'OnOffSwitch' ];
         super.buildSchema();
 
-        this.denonDevice = new DenonAVR({ host: this.avr.address });
-        this.denonDevice.on('disconnected', () => {
-            this.connectedNotify(false);
-        });
-        this.denonDevice.on('connected', () => {
-            this.connectedNotify(true);
-        });
-        this.ready = this.denonDevice.connect();
+        this.updateAVR(this.avr);
         this.isAVR = true;
         this.replacedProperties = ['volume', 'source', 'muted'];
 
@@ -894,6 +887,37 @@ class DenonDevice extends HEOSDevice {
         // }));
     }
 
+    async updateAVR(avr) {
+        this.avr = avr;
+        let hadDevice = false;
+        if(this.denonDevice) {
+            try {
+                this.denonDevice.off('connected');
+                this.denonDevice.off('raw');
+                this.denonDevice.off('disconnected');
+                this.denonDevice.disconnect();
+            }
+            finally {
+                hadDevice = true;
+            }
+        }
+        this.denonDevice = new DenonAVR({ host: this.avr.address });
+        this.denonDevice.on('disconnected', () => {
+            this.connectedNotify(false);
+        });
+        this.denonDevice.on('connected', () => {
+            this.connectedNotify(true);
+        });
+        this.ready = this.denonDevice.connect();
+        if(hadDevice) {
+            await this.ready;
+            const decoder = new TextDecoder();
+            this.denonDevice.on('raw', (buffer) => {
+                this.handleDenonInfo(decoder.decode(buffer)).catch(console.error);
+            });
+        }
+    }
+
     async updateState() {
         await Promise.all([
             super.updateState(),
@@ -902,10 +926,6 @@ class DenonDevice extends HEOSDevice {
         const decoder = new TextDecoder();
         this.denonDevice.on('raw', (buffer) => {
             this.handleDenonInfo(decoder.decode(buffer)).catch(console.error);
-        });
-        // initialize properties on first power on
-        this.denonDevice.once('powerOn', () => {
-            this.initDenonProperties();
         });
         // For some reason we have to ask for power twice. But then it works (maybe the lib eats one?).
         await this.denonDevice.connection.exec('PW?');
@@ -1035,6 +1055,9 @@ class DenonDevice extends HEOSDevice {
 
     destroy() {
         super.destroy();
+        this.denonDevice.off('raw');
+        this.denonDevice.off('connected');
+        this.denonDevice.off('disconnected');
         this.denonDevice.disconnect();
     }
 }
@@ -1212,6 +1235,9 @@ class DenonAdapter extends Adapter {
             }
             console.log('updating heos player', player.pid);
             device.heosPlayer = player;
+            if(device.isAVR && avr) {
+                device.updateAVR(avr);
+            }
             device.connectedNotify(true);
         }
     }
