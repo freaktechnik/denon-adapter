@@ -596,7 +596,8 @@ class DenonDevice extends HEOSDevice {
             type: 'number',
             minimum: 0,
             multipleOf: 0.5,
-            maximum: 98
+            maximum: 98,
+            '@type': 'LevelProperty'
         }));
         this.addProperty(new DenonProperty(this, 'muted', {
             title: 'Muted',
