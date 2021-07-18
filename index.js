@@ -216,7 +216,7 @@ class HEOSDevice extends Device {
         //     readOnly: true
         // }));
         this.addProperty(new HEOSProperty(this, 'source', {
-            title: 'source',
+            title: 'Source',
             type: 'string',
             enum: this.adapter.sourceInfo.map((source) => source.name),
             readOnly: true
