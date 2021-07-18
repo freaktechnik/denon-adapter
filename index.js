@@ -629,6 +629,15 @@ class DenonDevice extends HEOSDevice {
         //         '2' //HDMI2
         //     ]
         // }));
+        this.addProperty(new DenonProperty(this, 'audioOutput', {
+            title: 'Audio Output',
+            type: 'string',
+            enum: [
+                'Speaker',
+                'Bluetooth Headphones'
+            ],
+            readOnly: true
+        }))
 
         this.addProperty(new DenonProperty(this, 'surroundMode', {
             title: 'Surround Mode',
@@ -924,9 +933,18 @@ class DenonDevice extends HEOSDevice {
         await this.denonDevice.connection.exec('MU?');
         await this.denonDevice.connection.exec('MS?');
         await this.denonDevice.connection.exec('SI?');
+        await this.denonDevice.connection.exec('OPTXM?');
     }
 
     async handleDenonInfo(message) {
+        if(message.split('\r').length > 2) {
+            for(const actualMessage of message.split('\r')) {
+                if(actualMessage) {
+                    await this.handleDenonInfo(`${actualMessage}\r`);
+                }
+            }
+            return;
+        }
         // strip \r
         message = message.slice(0, -1);
         if(message.startsWith('PSLFC')) {
@@ -978,6 +996,15 @@ class DenonDevice extends HEOSDevice {
         }
         else if(message === 'PWON') {
             await this.initDenonProperties();
+        }
+        else if(message.startsWith('OPTXM')) {
+            const [, value ] = message.split(' ');
+            if(value.trim() === 'CON') {
+                this.findProperty('audioOutput').setCachedValueAndNotify('Bluetooth Headphones');
+            }
+            else if(value.trim() === 'DIS') {
+                this.findProperty('audioOutput').setCachedValueAndNotify('Speaker');
+            }
         }
         else {
             console.log(message);
