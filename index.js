@@ -492,7 +492,7 @@ class DenonProperty extends Property {
     async setValue(value) {
         switch(this.name) {
             case 'on':
-                await this.device.denonDevice.connection.exec(value ? 'PWON' : 'PWSTANDBY');
+                await this.device.denonDevice.connection.exec(`PW${value ? 'ON' : 'STANDBY'}`);
                 break;
             case 'audysseyLFC':
                 await this.device.denonDevice.connection.exec(`PSLFC ${value ? 'ON' : 'OFF'}`);
@@ -557,6 +557,7 @@ class DenonDevice extends HEOSDevice {
         this.isAVR = true;
         this.replacedProperties = ['volume', 'source', 'muted'];
 
+        //TODO control ZM instead of PW with this?
         this.addProperty(new DenonProperty(this, 'on', {
             title: 'Power',
             type: 'boolean',
@@ -898,13 +899,6 @@ class DenonDevice extends HEOSDevice {
             super.updateState(),
             this.ready
         ]);
-        //TODO maybe use main zone info?
-        this.denonDevice.on('powerOn', () => {
-            this.findProperty('on').setCachedValueAndNotify(true);
-        });
-        this.denonDevice.on('powerStandby', () => {
-            this.findProperty('on').setCachedValueAndNotify(false);
-        });
         const decoder = new TextDecoder();
         this.denonDevice.on('raw', (buffer) => {
             this.handleDenonInfo(decoder.decode(buffer)).catch(console.error);
@@ -923,7 +917,6 @@ class DenonDevice extends HEOSDevice {
             return;
         }
         this.initedProperties = true;
-        this.findProperty('on').setCachedValueAndNotify(true);
         await this.denonDevice.connection.exec('PSLFC?');
         await this.denonDevice.connection.exec('TFAN?');
         await this.denonDevice.connection.exec('TFANNAME?');
@@ -995,7 +988,11 @@ class DenonDevice extends HEOSDevice {
             this.findProperty('surroundMode').setCachedValueAndNotify(message.slice(2));
         }
         else if(message === 'PWON') {
+            this.findProperty('on').setCachedValueAndNotify(true);
             await this.initDenonProperties();
+        }
+        else if(message === 'PWSTANDBY') {
+            this.findProperty('on').setCachedValueAndNotify(false);
         }
         else if(message.startsWith('OPTXM')) {
             const [, value ] = message.split(' ');
