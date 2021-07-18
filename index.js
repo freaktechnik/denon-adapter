@@ -921,7 +921,7 @@ class DenonDevice extends HEOSDevice {
         this.ready = this.denonDevice.connect();
         if(hadDevice) {
             await this.ready;
-            this.denonDevice.on('raw', );
+            this.denonDevice.on('raw', this.rawListener);
         }
     }
 
