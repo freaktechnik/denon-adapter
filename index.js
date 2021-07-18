@@ -369,12 +369,7 @@ class HEOSDevice extends Device {
                     sourceName = localSource.name;
                 }
 
-                if(!this.replacedProperties.includes('source')) {
-                    this.findProperty('source').setCachedValueAndNotify(sourceName);
-                }
-                else {
-                    this.findProperty('heosSource').setCachedValueAndNotify(sourceName);
-                }
+                this.findProperty('source').setCachedValueAndNotify(sourceName);
                 this.findProperty('title').setCachedValueAndNotify(message.payload.song);
                 this.findProperty('album').setCachedValueAndNotify(message.payload.album);
                 this.findProperty('artist').setCachedValueAndNotify(message.payload.artist);
@@ -517,27 +512,13 @@ class DenonProperty extends Property {
             case 'muted':
                 await this.device.denonDevice.connection.exec(`MU${value ? 'ON' : 'OFF'}`);
                 break;
-            case 'source':
+            case 'avrSource':
                 await this.device.denonDevice.connection.exec(`SI${value}`);
                 break;
             case 'surroundMode':
                 await this.device.denonDevice.connection.exec(`MS${value}`);
                 break;
         }
-    }
-}
-
-class HeosProxyProperty extends HEOSProperty {
-    constructor(device, name, props) {
-        super(device, `heos${name[0].toUpperCase()}${name.slice(1)}`, props);
-        const fakeProto = {
-            name,
-        };
-        Object.setPrototypeOf(fakeProto, this);
-    }
-
-    async setValue(value) {
-        return super.setValue.call(fakeProto, value);
     }
 }
 
@@ -558,7 +539,7 @@ class DenonDevice extends HEOSDevice {
         }
         this.updateAVR(this.avr);
         this.isAVR = true;
-        this.replacedProperties = ['volume', 'source', 'muted'];
+        this.replacedProperties = ['volume', 'muted'];
 
         //TODO control ZM instead of PW with this?
         this.addProperty(new DenonProperty(this, 'on', {
@@ -567,8 +548,8 @@ class DenonDevice extends HEOSDevice {
             '@type': 'OnOffProperty'
         }));
         //TODO granular volume properties
-        this.addProperty(new DenonProperty(this, 'source', {
-            title: 'Input',
+        this.addProperty(new DenonProperty(this, 'avrSource', {
+            title: 'AVR Input',
             type: 'string',
             enum: [
                 'PHONO',
@@ -585,11 +566,6 @@ class DenonDevice extends HEOSDevice {
                 'NET', // HEOS -> expand into heos?
                 'BT'
             ],
-        }));
-        this.addProperty(new HeosProxyProperty(this, 'source', {
-            title: 'HEOS Input',
-            type: 'string',
-            enum: this.adapter.sourceInfo.map((source) => source.name)
         }));
         this.addProperty(new DenonProperty(this, 'volume', {
             title: 'Volume',
@@ -969,7 +945,7 @@ class DenonDevice extends HEOSDevice {
         }
         else if(message.startsWith('TFANNAME')) {
             const name = message.slice(8).trim();
-            const source = await this.getProperty('source');
+            const source = await this.getProperty('avrSource');
             this.overrideStation = source !== 'NET';
             if(source !== 'TUNER') {
                 // Ignore RDS while we aren't listening to the tuner (might be relevant for z2 though)
@@ -1006,7 +982,7 @@ class DenonDevice extends HEOSDevice {
             if(source !== 'NET' && source !== 'TUNER') {
                 this.findProperty('station').setCachedValueAndNotify('');
             }
-            this.findProperty('source').setCachedValueAndNotify(source);
+            this.findProperty('avrSource').setCachedValueAndNotify(source);
         }
         else if(message.startsWith('MS')) {
             this.findProperty('surroundMode').setCachedValueAndNotify(message.slice(2));
