@@ -842,7 +842,7 @@ class DenonDevice extends HEOSDevice {
             maximum: 56
         }));
         this.addProperty(new DenonProperty(this, 'band', {
-            title: 'band',
+            title: 'Band',
             type: 'string',
             enum: [
                 'AM',
@@ -1068,7 +1068,9 @@ class DenonAdapter extends Adapter {
             this.heosConnection.onClose(() => {
                 this.heosConnection = null;
                 for(const device of Object.values(this.devices)) {
-                    device.connectedNotify(false);
+                    if(!device.isAVR) {
+                        device.connectedNotify(false);
+                    }
                 }
             });
             this.heosConnection.on({ commandGroup: 'event', command: 'sources_changed' }, () => {
@@ -1229,6 +1231,7 @@ class DenonAdapter extends Adapter {
 
     unload() {
         this.cancelPairing();
+        this.heosConnection.close();
         return super.unload();
     }
 }
