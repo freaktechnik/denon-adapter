@@ -65,7 +65,28 @@ const NO_STATION = [
 ];
 
 class HEOSProperty extends Property {
+    async checkValue(value) {
+        if(this.readOnly) {
+            throw new Error('Read-only property');
+        }
+
+        if(typeof this.minimum !== 'undefined' && value < this.minimum) {
+            throw new Error(`Value less than minimum: ${this.minimum}`);
+        }
+
+        if(typeof this.maximum !== 'undefined' && value > this.maximum) {
+            throw new Error(`Value bigger than maximum: ${this.maximum}`);
+        }
+
+        if(this.enum && this.enum.length > 0 && !this.enum.includes(`${value}`)) {
+            throw new Error('Invalid enum value');
+        }
+    }
     async setValue(value) {
+        if(value === this.value) {
+            return value;
+        }
+        await this.checkValue(value);
         switch(this.name) {
             case 'playing':
                 const source = await this.getProperty('source');
@@ -105,6 +126,8 @@ class HEOSProperty extends Property {
                 });
                 break;
         }
+        this.setCachedValueAndNotify(value);
+        return value;
     }
 }
 
@@ -485,6 +508,10 @@ const REMOTE_KEYS = {
 
 class DenonProperty extends Property {
     async setValue(value) {
+        if(value === this.value) {
+            return value;
+        }
+        await this.checkValue(value);
         switch(this.name) {
             case 'on':
                 await this.device.denonDevice.connection.exec(`PW${value ? 'ON' : 'STANDBY'}`);
@@ -519,6 +546,8 @@ class DenonProperty extends Property {
                 await this.device.denonDevice.connection.exec(`MS${value}`);
                 break;
         }
+        this.setCachedValueAndNotify(value);
+        return value;
     }
 }
 
