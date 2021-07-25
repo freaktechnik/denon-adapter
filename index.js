@@ -506,7 +506,7 @@ const REMOTE_KEYS = {
     info: 'MNINF'
 };
 
-class DenonProperty extends Property {
+class DenonProperty extends HEOSProperty {
     async setValue(value) {
         if(value === this.value) {
             return value;
