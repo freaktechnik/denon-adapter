@@ -8,7 +8,7 @@
 const { Adapter, Device, Property, Event, Database, Action } = require('gateway-addon');
 const manifest = require('./manifest.json');
 const heos = require('heos-api');
-const { DenonAVR } = require('@chaws/denon');
+const net = require('net');
 const { Client } = require('node-ssdp');
 const fetch = require('node-fetch');
 const xmlParser = require('fast-xml-parser');
@@ -95,19 +95,19 @@ class HEOSProperty extends Property {
                 this.device.adapter.makeHeosRequest('player', 'set_play_state', {
                     pid: this.device.heosPlayer.pid,
                     state: value ? 'play' : pauseType
-                });
+                }, this);
                 break;
             case 'volume':
                 this.device.adapter.makeHeosRequest('player', 'set_volume', {
                     pid: this.device.heosPlayer.pid,
                     level: Math.floor(value).toString(10) //TODO can we send a float here?
-                });
+                }, this);
                 break;
             case 'muted':
                 this.device.adapter.makeHeosRequest('player', 'set_muted', {
                     pid: this.device.heosPlayer.pid,
                     state: value ? 'on' : 'off'
-                });
+                }, this);
                 break;
             case 'repeat':
                 const shuffle = await this.device.getProperty('shuffle');
@@ -115,7 +115,7 @@ class HEOSProperty extends Property {
                     pid: this.device.heosPlayer.pid,
                     repeat: value,
                     shuffle: shuffle ? 'on' : 'off'
-                });
+                }, this);
                 break;
             case 'shuffle':
                 const repeat = await this.device.getProperty('repeat');
@@ -123,7 +123,7 @@ class HEOSProperty extends Property {
                     pid: this.device.heosPlayer.pid,
                     repeat,
                     shuffle: value ? 'on' : 'off'
-                });
+                }, this);
                 break;
         }
         this.setCachedValueAndNotify(value);
@@ -335,8 +335,14 @@ class HEOSDevice extends Device {
 
     async updateState() {
         await this.adapter.ensureHeosConnection();
-        //TODO re-add listener when heosConnection resumes
+        if(this.hasHeosConnectionListener) {
+            return;
+        }
+        this.hasHeosConnectionListener = true;
         this.adapter.heosConnection.onAll((message) => {
+            if(this.destroyed) {
+                return;
+            }
             if (message && message.heos && message.heos.message && message.heos.message.parsed && message.heos.message.parsed.pid == this.heosPlayer.pid && (message.heos.result || 'success') === 'success') {
                 try {
                     this.handleHeosEvent(message);
@@ -442,51 +448,52 @@ class HEOSDevice extends Device {
      * @param {Action} action
      */
     async performAction(action) {
-        switch(action.getName()) {
+        switch(action.name) {
             case 'next':
                 await this.adapter.makeHeosRequest('player', 'play_next', {
                     pid: this.heosPlayer.pid
-                });
+                }, this);
                 break;
             case 'previous':
                 await this.adapter.makeHeosRequest('player', 'play_previous', {
                     pid: this.heosPlayer.pid
-                });
+                }, this);
                 break;
             case 'toggleMute':
                 await this.adapter.makeHeosRequest('player', 'toggle_mute', {
                     pid: this.heosPlayer.pid
-                });
+                }, this);
                 break;
             case 'stop':
                 await this.adapter.makeHeosRequest('player', 'set_play_state', {
                     pid: this.heosPlayer.pid,
                     state: 'stop'
-                });
+                }, this);
                 break;
             case 'play':
                 await this.adapter.makeHeosRequest('browse', 'play_stream', {
                     pid: this.heosPlayer.pid,
-                    url: action.getInput()
-                });
+                    url: action.input
+                }, this);
                 break;
             case 'playPreset':
                 await this.adapter.makeHeosRequest('browse', 'play_preset', {
                     pid: this.heosPlayer.pid,
-                    preset: action.getInput()
-                });
+                    preset: action.input
+                }, this);
                 break;
             case 'playInput':
                 await this.adapter.makeHeosRequest('browse', 'play_input', {
                     pid: this.heosPlayer.pid,
-                    input: action.getInput()
-                });
+                    input: action.input
+                }, this);
                 break;
         }
     }
 
     destroy() {
         //TODO remove heosConnection.onAll listener
+        this.destroyed = true;
     }
 }
 
@@ -506,7 +513,12 @@ const REMOTE_KEYS = {
     info: 'MNINF'
 };
 
-class DenonProperty extends HEOSProperty {
+const TOGGLE = {
+    TRUE: 'ON',
+    FALSE: 'OFF'
+};
+
+class ZoneProperty extends HEOSProperty {
     async setValue(value) {
         if(value === this.value) {
             return value;
@@ -514,36 +526,162 @@ class DenonProperty extends HEOSProperty {
         await this.checkValue(value);
         switch(this.name) {
             case 'on':
-                await this.device.denonDevice.connection.exec(`PW${value ? 'ON' : 'STANDBY'}`);
+                await this.device.parent.sendCommand(`${this.device.zone}${DenonProperty.formatToggle(value)}`);
                 break;
-            case 'audysseyLFC':
-                await this.device.denonDevice.connection.exec(`PSLFC ${value ? 'ON' : 'OFF'}`);
-                break;
-            case 'band':
-                await this.device.denonDevice.connection.exec(`TMAN${value}`);
-                break;
-            case 'preset':
-                await this.device.denonDevice.connection.exec(`TPAN${value.toFixed(0).padStart(2, '0')}`);
-                break;
-            case 'tunerFrequency':
-                await this.device.denonDevice.connection.exec(`TFAN${(value * 100).toFixed(0).padStart(6, '0')}`);
+            case 'input':
+                await this.device.parent.sendCommand(`${this.device.zone}${value}`);
                 break;
             case 'volume':
-                const intPart = Math.floor(value);
-                let stringValue = intPart.toFixed(0).padStart(2, '0');
-                if(intPart !== value) {
-                    stringValue += '5';
-                }
-                await this.device.denonDevice.connection.exec(`MV${stringValue}`);
+                const stringValue = DenonProperty.formatVolume(value);
+                await this.device.parent.sendCommand(`${this.device.zone}${stringValue}`);
                 break;
             case 'muted':
-                await this.device.denonDevice.connection.exec(`MU${value ? 'ON' : 'OFF'}`);
+                await this.device.parent.sendCommand(`${this.device.zone}MU${DenonProperty.formatToggle(value)}`);
+                break;
+        }
+        this.setCachedValueAndNotify(value);
+        return value;
+    }
+}
+
+class DenonZone extends Device {
+    constructor(adapter, parent, zoneId, zoneName) {
+        super(adapter, parent.id + zoneId);
+        this.name = `${parent.name} ${zoneName}`;
+        this['@type'] = [ 'OnOffSwitch' ];
+        this.isZone = true;
+        this.parent = parent;
+        this.zone = zoneId;
+
+        this.addProperty(new ZoneProperty(this, 'on', {
+            title: 'Power',
+            type: 'boolean',
+            '@type': 'OnOffProperty'
+        }));
+        this.addProperty(new ZoneProperty(this, 'input', {
+            title: 'Input',
+            type: 'string',
+            enum: [
+                'SOURCE', // follow main zone source
+                'PHONO',
+                'CD',
+                'DVD',
+                'BD',
+                'TV',
+                'SAT/CBL',
+                'MPLAY',
+                'GAME',
+                'TUNER',
+                'AUX1',
+                'AUX2',
+                'NET',
+                'BT'
+            ],
+        }));
+        this.addProperty(new ZoneProperty(this, 'volume', {
+            title: 'Volume',
+            type: 'number',
+            minimum: 0,
+            maximum: 98,
+            multipleOf: 0.5,
+            '@type': 'LevelProperty'
+        }));
+        this.addProperty(new ZoneProperty(this, 'muted', {
+            title: 'Muted',
+            type: 'boolean'
+        }));
+
+
+        this.parent.ready.then(() => this.adapter.handleDeviceAdded(this));
+    }
+
+    async initDenonProperties() {
+        await this.parent.sendCommand(`${this.zone}?`);
+        await this.parent.sendCommand(`${this.zone}MU?`);
+    }
+
+    async handleDenonInfo(message) {
+        const withoutZone = message.slice(this.zone.length);
+        if(withoutZone.startsWith('MU')) {
+            this.findProperty('muted').setCachedValueAndNotify(message.endsWith(TOGGLE.TRUE));
+            return true;
+        }
+        const number = Number.parseInt(withoutZone);
+        if(!Number.isNaN(number)) {
+            const parsedVolume = DenonDevice.parseVolume(withoutZone);
+            this.findProperty('volume').setCachedValueAndNotify(parsedVolume);
+            return true;
+        }
+        if(withoutZone === TOGGLE.TRUE || withoutZone === TOGGLE.FALSE) {
+            if(withoutZone === TOGGLE.TRUE) {
+                await this.parent.initDenonProperties();
+            }
+            this.findProperty('on').setCachedValueAndNotify(withoutZone === TOGGLE.TRUE);
+            return true;
+        }
+        if(this.findProperty('input').enum.includes(withoutZone)) {
+            this.findProperty('input').setCachedValueAndNotify(withoutZone);
+            return true;
+        }
+
+        return false;
+    }
+
+    destroy() {
+        if(this.parent) {
+            this.adapter.removeThing(this.parent);
+            this.parent.zone2 = undefined;
+        }
+    }
+}
+
+class DenonProperty extends HEOSProperty {
+    static formatVolume(value) {
+        const intPart = Math.floor(value);
+        let stringValue = intPart.toFixed(0).padStart(2, '0');
+        if(intPart !== value) {
+            stringValue += '5';
+        }
+        return stringValue;
+    }
+
+    static formatToggle(value) {
+        return value ? TOGGLE.TRUE : TOGGLE.FALSE;
+    }
+
+    async setValue(value) {
+        if(value === this.value) {
+            return value;
+        }
+        await this.checkValue(value);
+        switch(this.name) {
+            case 'on':
+                await this.device.sendCommand(`ZM${DenonProperty.formatToggle(value)}`);
+                break;
+            case 'audysseyLFC':
+                await this.device.sendCommand(`PSLFC ${DenonProperty.formatToggle(value)}`);
+                break;
+            case 'band':
+                await this.device.sendCommand(`TMAN${value}`);
+                break;
+            case 'preset':
+                await this.device.sendCommand(`TPAN${value.toFixed(0).padStart(2, '0')}`);
+                break;
+            case 'tunerFrequency':
+                await this.device.sendCommand(`TFAN${(value * 100).toFixed(0).padStart(6, '0')}`);
+                break;
+            case 'volume':
+                const stringValue = DenonProperty.formatVolume(value);
+                await this.device.sendCommand(`MV${stringValue}`);
+                break;
+            case 'muted':
+                await this.device.sendCommand(`MU${DenonProperty.formatToggle(value)}`);
                 break;
             case 'avrSource':
-                await this.device.denonDevice.connection.exec(`SI${value}`);
+                await this.device.sendCommand(`SI${value}`);
                 break;
             case 'surroundMode':
-                await this.device.denonDevice.connection.exec(`MS${value}`);
+                await this.device.sendCommand(`MS${value}`);
                 break;
         }
         this.setCachedValueAndNotify(value);
@@ -552,6 +690,14 @@ class DenonProperty extends HEOSProperty {
 }
 
 class DenonDevice extends HEOSDevice {
+    static parseVolume(volume) {
+        let parsedVolume = Number.parseInt(volume.slice(0, 2));
+        if(volume.length > 2) {
+            parsedVolume += Number.parseInt(volume.slice(2)) / (10 * volume.length - 2);
+        }
+        return parsedVolume;
+    }
+
     buildSchema() {
         this['@type'] = [ 'OnOffSwitch' ];
         super.buildSchema();
@@ -560,11 +706,15 @@ class DenonDevice extends HEOSDevice {
             this.connectedNotify(false);
         };
         this.connectedListener = () => {
+            console.log('connected');
             this.connectedNotify(true);
+            this.updateState().catch(console.error);
         };
         const decoder = new TextDecoder();
         this.rawListener = (buffer) => {
-            this.handleDenonInfo(decoder.decode(buffer)).catch(console.error);
+            this.handleDenonInfo(decoder.decode(buffer)).catch((error) => {
+                console.error('raw', error);
+            });
         }
         this.updateAVR(this.avr);
         this.isAVR = true;
@@ -879,55 +1029,47 @@ class DenonDevice extends HEOSDevice {
             ]
         }));
 
-        //TODO separate thing?
-        // this.addProperty(new HEOSProperty(this, 'zone2On', {
-        //     title: 'Zone 2 Power',
-        //     type: 'boolean',
-        //     '@type': 'OnOffProperty'
-        // }));
-        // this.addProperty(new HEOSProperty(this, 'zone2Input', {
-        //     title: 'Zone 2 Input',
-        //     type: 'string',
-        //     enum: []
-        // }));
-        // this.addProperty(new HEOSProperty(this, 'zone2Volume', {
-        //     title: 'Zone 2 Volume',
-        //     type: 'number',
-        //     minimum: 0,
-        //     maximum: 100,
-        //     '@type': 'LevelProperty'
-        // }));
-        // this.addProperty(new HEOSProperty(this, 'zone2Mute', {
-        //     title: 'Zone 2 Muted',
-        //     type: 'boolean'
-        // }));
+        this.zone2 = new DenonZone(this.adapter, this, 'Z2', 'Zone 2');
+        //TODO remove zone2 with this since they're dependent? Also update offline state in sync.
     }
 
     async updateAVR(avr) {
-        this.avr = avr;
-        let hadDevice = false;
-        if(this.denonDevice) {
-            try {
-                this.denonDevice.off('connected', this.connectedListener);
-                this.denonDevice.off('raw', this.rawListener);
-                this.denonDevice.off('disconnected', this.disconnectedListener);
-                this.denonDevice.disconnect();
+        if(!this.avr || avr.address !== this.avr.addrss) {
+            this.avr = avr;
+            if(this.denonDevice) {
+                try {
+                    this.denonDevice.off('connect', this.connectedListener);
+                    this.denonDevice.off('data', this.rawListener);
+                    this.denonDevice.off('close', this.disconnectedListener);
+                    this.denonDevice.disconnect();
+                }
+                catch(error) {
+                    console.warn(error);
+                }
             }
-            catch(error) {
-                console.warn(error);
-            }
-            finally {
-                hadDevice = true;
-            }
+            this.ready = new Promise((resolve) => {
+                this.denonDevice = net.createConnection(23, this.avr.address, resolve);
+            });
+            this.denonDevice.on('close', this.disconnectedListener);
+            this.denonDevice.on('connect', this.connectedListener);
+            this.denonDevice.on('data', this.rawListener);
         }
-        this.denonDevice = new DenonAVR({ host: this.avr.address });
-        this.denonDevice.on('disconnected', this.disconnectedListener);
-        this.denonDevice.on('connected', this.connectedListener);
-        this.ready = this.denonDevice.connect();
-        if(hadDevice) {
-            await this.ready;
-            this.denonDevice.on('raw', this.rawListener);
+        else {
+            this.avr = avr;
         }
+    }
+
+    async sendCommand(message) {
+        await new Promise((resolve, reject) => {
+            this.denonDevice.write(message, 'ascii', (error) => {
+                if(error) {
+                    reject(error);
+                }
+                else {
+                    resolve();
+                }
+            });
+        });
     }
 
     async updateState() {
@@ -935,10 +1077,8 @@ class DenonDevice extends HEOSDevice {
             super.updateState(),
             this.ready
         ]);
-        this.denonDevice.on('raw', this.rawListener);
-        // For some reason we have to ask for power twice. But then it works (maybe the lib eats one?).
-        await this.denonDevice.connection.exec('PW?');
-        await this.denonDevice.connection.exec('PW?');
+        await this.sendCommand('PW?');
+        await this.sendCommand('ZM?');
     }
 
     async initDenonProperties() {
@@ -946,16 +1086,17 @@ class DenonDevice extends HEOSDevice {
             return;
         }
         this.initedProperties = true;
-        await this.denonDevice.connection.exec('PSLFC?');
-        await this.denonDevice.connection.exec('TFAN?');
-        await this.denonDevice.connection.exec('TFANNAME?');
-        await this.denonDevice.connection.exec('TPAN?');
-        await this.denonDevice.connection.exec('TMAN?');
-        await this.denonDevice.connection.exec('MV?');
-        await this.denonDevice.connection.exec('MU?');
-        await this.denonDevice.connection.exec('MS?');
-        await this.denonDevice.connection.exec('SI?');
-        await this.denonDevice.connection.exec('OPTXM?');
+        await this.sendCommand('PSLFC?');
+        await this.sendCommand('TFAN?');
+        await this.sendCommand('TFANNAME?');
+        await this.sendCommand('TPAN?');
+        await this.sendCommand('TMAN?');
+        await this.sendCommand('MV?');
+        await this.sendCommand('MU?');
+        await this.sendCommand('MS?');
+        await this.sendCommand('SI?');
+        await this.sendCommand('OPTXM?');
+        await this.zone2.initDenonProperties();
     }
 
     async handleDenonInfo(message) {
@@ -996,15 +1137,11 @@ class DenonDevice extends HEOSDevice {
         }
         else if(message.startsWith('MV')) {
             const volume = message.slice(2).trim();
-            let parsedVolume = Number.parseInt(volume);
-            if(volume.length > 2) {
-                parsedVolume = Number.parseInt(volume.slice(0, 2));
-                parsedVolume += Number.parseInt(volume.slice(2)) / (10 * volume.length - 2);
-            }
+            const parsedVolume = DenonDevice.parseVolume(volume);
             this.findProperty('volume').setCachedValueAndNotify(parsedVolume);
         }
         else if(message.startsWith('MU')) {
-            this.findProperty('muted').setCachedValueAndNotify(message.endsWith('ON'));
+            this.findProperty('muted').setCachedValueAndNotify(message.endsWith(TOGGLE.TRUE));
         }
         else if(message.startsWith('SI')) {
             const source = message.slice(2);
@@ -1016,14 +1153,21 @@ class DenonDevice extends HEOSDevice {
         else if(message.startsWith('MS')) {
             this.findProperty('surroundMode').setCachedValueAndNotify(message.slice(2));
         }
-        else if(message === 'PWON') {
-            console.log('on');
-            this.findProperty('on').setCachedValueAndNotify(true);
-            await this.initDenonProperties();
+        else if(message.startsWith('ZM')) {
+            if(message.endsWith(TOGGLE.TRUE)) {
+                await this.initDenonProperties();
+            }
+            this.findProperty('on').setCachedValueAndNotify(message.endsWith(TOGGLE.TRUE));
         }
         else if(message === 'PWSTANDBY') {
-            console.log('off');
             this.findProperty('on').setCachedValueAndNotify(false);
+            this.zone2.findProperty('on').setCachedValueAndNotify(false);
+        }
+        else if(message === 'PWON') {
+            if(!this.initedProperties) {
+                await this.sendCommand('ZM?');
+                await this.sendCommand('Z2?');
+            }
         }
         else if(message.startsWith('OPTXM')) {
             const [, value ] = message.split(' ');
@@ -1033,6 +1177,9 @@ class DenonDevice extends HEOSDevice {
             else if(value.trim() === 'DIS') {
                 this.findProperty('audioOutput').setCachedValueAndNotify('Speaker');
             }
+        }
+        else if(message.startsWith(this.zone2.zone) && this.zone2.handleDenonInfo(message)) {
+            // message handled by zone2
         }
         else {
             console.log(message);
@@ -1044,18 +1191,18 @@ class DenonDevice extends HEOSDevice {
      * @param {Action} action
      */
     async performAction(action) {
-        if(IR_MAP.hasOwnProperty(action.getName())) {
-            return this.denonDevice.connection.exec(IR_MAP[action.getName()]);
+        if(IR_MAP.hasOwnProperty(action.name)) {
+            return this.sendCommand(IR_MAP[action.name]);
         }
-        switch(action.getName()) {
+        switch(action.name) {
             case 'remote':
-                await this.denonDevice.connection.exec(REMOTE_KEYS[action.getInput()]);
+                await this.sendCommand(REMOTE_KEYS[action.input]);
                 break;
             case 'seekUp':
-                await this.denonDevice.connection.exec('TFANUP');
+                await this.sendCommand('TFANUP');
                 break;
             case 'seekUp':
-                await this.denonDevice.connection.exec('TFANDOWN');
+                await this.sendCommand('TFANDOWN');
                 break;
             default:
                 return super.performAction(action);
@@ -1064,10 +1211,18 @@ class DenonDevice extends HEOSDevice {
 
     destroy() {
         super.destroy();
+        if(this.zone2) {
+            this.adapter.removeThing(this.zone2);
+            this.zone2.parent = undefined;
+        }
         this.denonDevice.off('raw', this.rawListener);
         this.denonDevice.off('connected', this.connectedListener);
         this.denonDevice.off('disconnected', this.disconnectedListener);
         this.denonDevice.disconnect();
+    }
+
+    connectedNotify(state) {
+        this.zone2.connectedNotify(state);
     }
 }
 
@@ -1093,11 +1248,16 @@ class DenonAdapter extends Adapter {
     async ensureHeosConnection(timeoutInS = 60) {
         if(!this.heosConnection) {
             this.heosConnection = await heos.discoverAndConnect({ timeout: timeoutInS * S_TO_MS });
-            await this.initSources();
+            try {
+                await this.initSources();
+            }
+            catch(error) {
+                console.warn('error updating source', error);
+            }
             this.heosConnection.onClose(() => {
                 this.heosConnection = null;
                 for(const device of Object.values(this.devices)) {
-                    if(!device.isAVR) {
+                    if(!device.isAVR && !device.isZone) {
                         device.connectedNotify(false);
                     }
                 }
@@ -1108,6 +1268,17 @@ class DenonAdapter extends Adapter {
             this.heosConnection.on({ commandGroup: 'event', command: 'players_changed' }, () => {
                 this._startPairing().catch(console.error);
             });
+            for(const device of Object.values(this.devices)) {
+                if(!device.isZone) {
+                    device.hasHeosConnectionListener = false;
+                    try {
+                        await device.updateState()
+                    }
+                    catch(error) {
+                        console.error('error updating state of', device.id, error);
+                    }
+                }
+            }
         }
         return this.heosConnection;
     }
@@ -1115,7 +1286,12 @@ class DenonAdapter extends Adapter {
     async initSources() {
         const message = await this.makeHeosRequest('browser', 'get_music_sources');
         this.sourceInfo = message.payload.filter((source) => source.available == 'true');
-        //TODO should also update the enum on all things...
+        const sourceEnum = this.sourceInfo.map((source) => source.name);
+        for(const device of Object.values(this.devices)) {
+            if(!device.isZone) {
+                device.findProperty('source').enum = sourceEnum;
+            }
+        }
     }
 
     startPairing(timeoutInS = 60) {
@@ -1168,7 +1344,6 @@ class DenonAdapter extends Adapter {
                         heosConnection.write('player', 'get_players');
                     });
                     const heosPlayer = heosPlayers.find((player) => player.serial === parsed.root.device.serialNumber) || heosPlayers[0];
-                    console.log('found avr', parsed.root.device.friendlyName);
                     this.onDiscover(heosPlayer, {
                         address: networkInfo.address,
                         serial: parsed.root.device.serialNumber,
@@ -1185,9 +1360,12 @@ class DenonAdapter extends Adapter {
         });
         this.ssdpClient.search('urn:schemas-denon-com:device:ACT-Denon:1');
         this.pairingTimeout = setTimeout(() => {
+            this.pairingTimeout = undefined;
+            if(!this.ssdpClient) {
+                return;
+            }
             this.ssdpClient.stop()
             this.ssdpClient = undefined;
-            this.pairingTimeout = undefined;
         }, timeoutInS * S_TO_MS);
     }
 
@@ -1200,20 +1378,36 @@ class DenonAdapter extends Adapter {
             seenPids.add(player.pid);
         }
         for(const player of Object.values(this.devices)) {
-            if(!seenPids.has(player.heosPlayer.pid)) {
+            if(!player.isZone && !seenPids.has(player.heosPlayer.pid)) {
                 this.removeThing(player);
             }
         }
     }
 
-    async makeHeosRequest(commandGroup, command, options) {
-        //TODO should fallback to direct connection for AVRs?
-        await this.ensureHeosConnection();
+    async makeHeosRequest(commandGroup, command, options, callingDevice) {
+        let connection;
+        let tempConnection = false;
+        try {
+            await this.ensureHeosConnection();
+            connection = this.heosConnection;
+        }
+        catch(error) {
+            if(callingDevice && callingDevice.isAVR) {
+                connection = await heos.connect(callingDevice.avr.address);
+                tempConnection = true;
+            }
+            else {
+                throw error;
+            }
+        }
         return new Promise((resolve, reject) => {
-            this.heosConnection.once({
+            connection.once({
                 commandGroup,
                 command
             }, (message) => {
+                if(tempConnection) {
+                    connection.close();
+                }
                 if(message && message.heos && message.heos.result === 'success') {
                     resolve(message);
                 }
@@ -1221,30 +1415,26 @@ class DenonAdapter extends Adapter {
                     reject(message);
                 }
             });
-            this.heosConnection.write(commandGroup, command, options);
+            connection.write(commandGroup, command, options);
         });
     }
 
     onDiscover(player, avr) {
         if(!this.devices.hasOwnProperty(`heos-${player.pid}`)) {
             if(avr) {
-                console.log('new avr', player.pid);
                 new DenonDevice(this, { player, avr });
             }
             else {
-                console.log('new heos', player.pid);
                 new HEOSDevice(this, { player });
             }
         }
         else {
             const device = this.getDevice(`heos-${player.pid}`);
             if(avr && !device.isAVR) {
-                console.log('upgrading to avr', player.pid);
                 this.removeThing(device);
                 this.onDiscover(player, avr);
                 return;
             }
-            console.log('updating heos player', player.pid);
             device.heosPlayer = player;
             if(device.isAVR && avr) {
                 device.updateAVR(avr);

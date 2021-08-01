@@ -9,7 +9,6 @@
   "author": "Martin Giger (https://humanoids.be)",
   "license": "MIT",
   "dependencies": {
-    "@chaws/denon": "^0.0.5",
     "fast-xml-parser": "^3.19.0",
     "heos-api": "^4.0.0",
     "node-fetch": "^2.6.1",
