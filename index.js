@@ -1041,7 +1041,7 @@ class DenonDevice extends HEOSDevice {
                     this.denonDevice.off('connect', this.connectedListener);
                     this.denonDevice.off('data', this.rawListener);
                     this.denonDevice.off('close', this.disconnectedListener);
-                    this.denonDevice.disconnect();
+                    this.denonDevice.destroy();
                 }
                 catch(error) {
                     console.warn(error);
@@ -1218,7 +1218,7 @@ class DenonDevice extends HEOSDevice {
         this.denonDevice.off('raw', this.rawListener);
         this.denonDevice.off('connected', this.connectedListener);
         this.denonDevice.off('disconnected', this.disconnectedListener);
-        this.denonDevice.disconnect();
+        this.denonDevice.destroy();
     }
 
     connectedNotify(state) {
@@ -1266,7 +1266,7 @@ class DenonAdapter extends Adapter {
                 this.initSources().catch(console.error);
             });
             this.heosConnection.on({ commandGroup: 'event', command: 'players_changed' }, () => {
-                this._startPairing().catch(console.error);
+                this._startPairing(60).catch(console.error);
             });
             for(const device of Object.values(this.devices)) {
                 if(!device.isZone) {
