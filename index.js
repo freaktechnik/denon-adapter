@@ -334,7 +334,7 @@ class HEOSDevice extends Device {
     }
 
     async updateState() {
-        await this.adapter.ensureHeosConnection();
+        await this.adapter.ensureHeosConnection(undefined, this);
         if(this.hasHeosConnectionListener) {
             return;
         }
@@ -1245,7 +1245,7 @@ class DenonAdapter extends Adapter {
      *
      * @returns {Promise<HeosConnection>}
      */
-    async ensureHeosConnection(timeoutInS = 60) {
+    async ensureHeosConnection(timeoutInS = 60, caller) {
         if(!this.heosConnection) {
             this.heosConnection = await heos.discoverAndConnect({ timeout: timeoutInS * S_TO_MS });
             try {
@@ -1269,7 +1269,7 @@ class DenonAdapter extends Adapter {
                 this._startPairing(60).catch(console.error);
             });
             for(const device of Object.values(this.devices)) {
-                if(!device.isZone) {
+                if(!device.isZone && (!caller || caller.id !== device.id)) {
                     device.hasHeosConnectionListener = false;
                     try {
                         await device.updateState()
