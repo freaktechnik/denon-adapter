@@ -5,7 +5,7 @@
 
 'use strict';
 
-const { Adapter, Device, Property, Event, Database, Action } = require('gateway-addon');
+const { Adapter, Device, Property, Event, Action } = require('gateway-addon');
 const manifest = require('./manifest.json');
 const heos = require('heos-api');
 const net = require('net');
@@ -1247,40 +1247,54 @@ class DenonAdapter extends Adapter {
      */
     async ensureHeosConnection(timeoutInS = 60, caller) {
         if(!this.heosConnection) {
-            this.heosConnection = await heos.discoverAndConnect({ timeout: timeoutInS * S_TO_MS });
-            try {
-                await this.initSources();
-            }
-            catch(error) {
-                console.warn('error updating source', error);
-            }
-            this.heosConnection.onClose(() => {
-                this.heosConnection = null;
-                for(const device of Object.values(this.devices)) {
-                    if(!device.isAVR && !device.isZone) {
-                        device.connectedNotify(false);
-                    }
-                }
-            });
-            this.heosConnection.on({ commandGroup: 'event', command: 'sources_changed' }, () => {
-                this.initSources().catch(console.error);
-            });
-            this.heosConnection.on({ commandGroup: 'event', command: 'players_changed' }, () => {
-                this._startPairing(60).catch(console.error);
-            });
+            const heosConnection = await heos.discoverAndConnect({ timeout: timeoutInS * S_TO_MS });
+            this.setHeosConnection(heosConnection);
+        }
+        return this.heosConnection;
+    }
+
+    /**
+     * 
+     * @param {HeosConnection} heosConnection
+     */
+    setHeosConnection(heosConnection) {
+        this.heosConnection = heosConnection;
+        try {
+            await this.initSources();
+        }
+        catch(error) {
+            console.warn('error updating source', error);
+        }
+        const disconnect = () => {
+            this.heosConnection = null;
             for(const device of Object.values(this.devices)) {
-                if(!device.isZone && (!caller || caller.id !== device.id)) {
-                    device.hasHeosConnectionListener = false;
-                    try {
-                        await device.updateState()
-                    }
-                    catch(error) {
-                        console.error('error updating state of', device.id, error);
-                    }
+                if(!device.isAVR && !device.isZone) {
+                    device.connectedNotify(false);
+                }
+            }
+        };
+        this.heosConnection.onClose(disconnect);
+        this.heosConnection.onError((error) => {
+            console.error(error);
+            disconnect();
+        });
+        this.heosConnection.on({ commandGroup: 'event', command: 'sources_changed' }, () => {
+            this.initSources().catch(console.error);
+        });
+        this.heosConnection.on({ commandGroup: 'event', command: 'players_changed' }, () => {
+            this._startPairing(60).catch(console.error);
+        });
+        for(const device of Object.values(this.devices)) {
+            if(!device.isZone && (!caller || caller.id !== device.id)) {
+                device.hasHeosConnectionListener = false;
+                try {
+                    await device.updateState()
+                }
+                catch(error) {
+                    console.error('error updating state of', device.id, error);
                 }
             }
         }
-        return this.heosConnection;
     }
 
     async initSources() {
@@ -1327,7 +1341,7 @@ class DenonAdapter extends Adapter {
                 try {
                     const heosConnection = await heos.connect(networkInfo.address);
                     if(!this.heosConnection) {
-                        this.heosConnection = heosConnection;
+                        this.setHeosConnection(heosConnection);
                     }
                     const heosPlayers = await new Promise((resolve, reject) => {
                         heosConnection.once({
@@ -1370,7 +1384,7 @@ class DenonAdapter extends Adapter {
     }
 
     async _startPairing(timeoutInS) {
-        this.getDenonAVRs(timeoutInS)
+        this.getDenonAVRs(timeoutInS);
         const players = await this.getHeosPlayers(timeoutInS);
         const seenPids = new Set();
         for(const player of players) {
