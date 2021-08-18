@@ -1243,12 +1243,14 @@ class DenonAdapter extends Adapter {
 
     /**
      *
+     * @param {number} [timeoutInS=60]
+     * @param {Device} [caller]
      * @returns {Promise<HeosConnection>}
      */
     async ensureHeosConnection(timeoutInS = 60, caller) {
         if(!this.heosConnection) {
             const heosConnection = await heos.discoverAndConnect({ timeout: timeoutInS * S_TO_MS });
-            await this.setHeosConnection(heosConnection);
+            await this.setHeosConnection(heosConnection, caller);
         }
         return this.heosConnection;
     }
@@ -1256,8 +1258,9 @@ class DenonAdapter extends Adapter {
     /**
      *
      * @param {HeosConnection} heosConnection
+     * @param {Device} caller
      */
-    async setHeosConnection(heosConnection) {
+    async setHeosConnection(heosConnection, caller) {
         this.heosConnection = heosConnection;
         try {
             await this.initSources();
