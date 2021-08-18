@@ -1248,16 +1248,16 @@ class DenonAdapter extends Adapter {
     async ensureHeosConnection(timeoutInS = 60, caller) {
         if(!this.heosConnection) {
             const heosConnection = await heos.discoverAndConnect({ timeout: timeoutInS * S_TO_MS });
-            this.setHeosConnection(heosConnection);
+            await this.setHeosConnection(heosConnection);
         }
         return this.heosConnection;
     }
 
     /**
-     * 
+     *
      * @param {HeosConnection} heosConnection
      */
-    setHeosConnection(heosConnection) {
+    async setHeosConnection(heosConnection) {
         this.heosConnection = heosConnection;
         try {
             await this.initSources();
@@ -1341,7 +1341,7 @@ class DenonAdapter extends Adapter {
                 try {
                     const heosConnection = await heos.connect(networkInfo.address);
                     if(!this.heosConnection) {
-                        this.setHeosConnection(heosConnection);
+                        await this.setHeosConnection(heosConnection);
                     }
                     const heosPlayers = await new Promise((resolve, reject) => {
                         heosConnection.once({
