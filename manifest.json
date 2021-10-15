@@ -3,7 +3,7 @@
     "id": "denon-adapter",
     "name": "Denon AVR & HEOS",
     "short_name": "HEOS",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "description": "Adapter for Denon AVRs and possibly other HEOS devices",
     "homepage_url": "https://github.com/freaktechnik/denon-adapter",
     "license": "MIT",
